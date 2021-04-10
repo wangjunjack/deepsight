@@ -1,0 +1,125 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: elasticsearch
+  namespace: skywalking
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: elasticsearch
+  serviceName: elasticsearch
+  template:
+    metadata:
+      labels:
+        app: elasticsearch
+    spec:
+      imagePullSecrets:
+      - name: registry-pull-secret
+      containers:
+      - env:
+        - name: cluster.name
+          value: k8s-logs
+        - name: node.name
+          valueFrom:
+            fieldRef:
+              apiVersion: v1
+              fieldPath: metadata.name
+        - name: discovery.zen.ping.unicast.hosts
+          value: elasticsearch-0.elasticsearch,elasticsearch-1.elasticsearch,elasticsearch-2.elasticsearch
+        - name: discovery.zen.minimum_master_nodes
+          value: "2"
+        - name: ES_JAVA_OPTS
+          value: -Xms512m -Xmx512m
+        image: hub.deepsight.cloud/skywalking/elasticsearch:6.8.15
+        imagePullPolicy: Always
+        name: elasticsearch
+        ports:
+        - containerPort: 9200
+          name: rest
+          protocol: TCP
+        - containerPort: 9300
+          name: inter-node
+          protocol: TCP
+        resources:
+          limits:
+            cpu: "1"
+          requests:
+            cpu: 500m
+        volumeMounts:
+        - mountPath: /usr/share/elasticsearch/data
+          name: data
+      initContainers:
+      - command:
+        - sh
+        - -c
+        - chown -R 1000:1000 /usr/share/elasticsearch/data
+        image: busybox
+        imagePullPolicy: Always
+        name: fix-permissions
+        securityContext:
+          privileged: true
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        volumeMounts:
+        - mountPath: /usr/share/elasticsearch/data
+          name: data
+      - command:
+        - sysctl
+        - -w
+        - vm.max_map_count=262144
+        image: busybox
+        imagePullPolicy: Always
+        name: increase-vm-max-map
+        resources: {}
+        securityContext:
+          privileged: true
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+      - command:
+        - sh
+        - -c
+        - ulimit -n 65536
+        image: busybox
+        imagePullPolicy: Always
+        name: increase-fd-ulimit
+        resources: {}
+        securityContext:
+          privileged: true
+      volumes:
+      - emptyDir: {}
+        name: data
+
+---
+kind: Service
+apiVersion: v1
+metadata:
+  name: elasticsearch
+  namespace: skywalking
+  labels:
+    app: elasticsearch
+spec:
+  selector:
+    app: elasticsearch
+  clusterIP: None
+  ports:
+    - port: 9200
+      name: rest
+    - port: 9300
+      name: inter-node
+
+---
+kind: Service
+apiVersion: v1
+metadata:
+  name: elasticsearch-logging
+  namespace: skywalking
+  labels:
+    app: elasticsearch
+spec:
+  selector:
+    app: elasticsearch
+  ports:
+    - port: 9200
+      name: external
+

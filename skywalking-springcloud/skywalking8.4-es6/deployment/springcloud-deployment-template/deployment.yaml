@@ -1,0 +1,104 @@
+---
+# Deployment include Skywalking Agent of Sidecar. The Version's 8.4.0-es6
+# This is Gateway service for springcloudAlibaba
+# By John Wang 2021-03-25 PM 11:30
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: deepsight-gateway
+  namespace: deepsight-test
+  labels:
+    app: deepsight-gateway
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: deepsight-gateway
+  template:
+    metadata:
+      labels:
+        app: deepsight-gateway
+    spec:
+      imagePullSecrets:
+      - name: registry-pull-secret
+      initContainers:
+        - image: hub.deepsight.cloud/skywalking/skywalking-agent-sidecar:8.4.0
+          name: sw-agent-sidecar
+          imagePullPolicy: IfNotPresent
+          command: ["sh"]
+          args:
+            [
+            "-c",
+            "mkdir -p /skywalking/agent && cp -r /usr/skywalking/agent/* /skywalking/agent",
+            ]
+          volumeMounts:
+            - mountPath: /skywalking/agent
+              name: sw-agent
+      containers:
+      - name: ds-gateway
+        image:  $IMAGE_NAME
+        imagePullPolicy: IfNotPresent
+        command: ["java"]
+        args:
+          [
+           "-javaagent:/usr/skywalking/agent/skywalking-agent.jar", "-jar", "app.jar","--spring.profiles.active=test",
+          ]
+        env:
+          - name: SW_AGENT_NAME # 定义服务名称,在skywalking UI中显示服务的实例名称
+            value: deepsight-gateway
+          - name: SW_AGENT_COLLECTOR_BACKEND_SERVICES # 定义OAP server Addresses
+            value: oap.skywalking:11800 
+          - name: SERVER_PORT # 配置java服务启动的端口，如果已经指定将此行注释
+            value: "8080"
+        resources:
+          limits:
+            memory: "700Mi"
+            cpu: "700m"
+          requests:
+            memory: "512Mi"
+            cpu: "500m"
+        readinessProbe:
+          httpGet:
+           path: /healthz
+           port: 80
+          initialDelaySeconds: 30 # 容器启动后多少秒开始健康检查
+          periodSeconds: 10 # Inspection interval
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 80
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        ports:
+        - containerPort: 80
+          name: httpservice
+          protocol: TCP
+        volumeMounts:
+        - name: host-time
+          mountPath: /etc/localtime
+        - name: sw-agent
+          mountPath: /usr/skywalking/agent
+      volumes:
+        - name: sw-agent
+          emptyDir: {}
+        - name: host-time
+          hostPath:
+            path: /etc/localtime
+---
+# Serivce For Deepsight-Gateway
+apiVersion: v1
+kind: Service
+metadata:
+  name: deepsight-gateway
+  namespace: deepsight-test
+  labels:
+    app: deepsight-test
+spec:
+  ports:
+  - name: web
+    port: 80
+    protocol: TCP
+    targetPort: 80
+  selector:
+    app: deepsight-gateway
+  

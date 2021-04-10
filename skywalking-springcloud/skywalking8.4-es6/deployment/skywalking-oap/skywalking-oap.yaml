@@ -1,0 +1,78 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: skywalking-oap
+  namespace: skywalking
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: skywalking-oap
+  template:
+    metadata:
+      labels:
+        app: skywalking-oap
+    spec:
+      serviceAccountName: skywalking-oap-sa
+      containers:
+      - name: oap
+        image: hub.deepsight.cloud/skywalking/skywalking-oap-server:8.4.0-es6
+        imagePullPolicy: Always
+        livenessProbe:
+          tcpSocket:
+            port: 12800
+          initialDelaySeconds: 15
+          periodSeconds: 20
+        readinessProbe:
+          tcpSocket:
+            port: 12800
+          initialDelaySeconds: 15
+          periodSeconds: 20
+        ports:
+        - containerPort: 11800
+          name: grpc
+        - containerPort: 12800
+          name: rest
+        resources:
+          requests:
+            memory: 4Gi
+          limits:
+            memory: 6Gi
+        env:
+        - name: JAVA_OPTS
+          value: "-Xmx4g -Xms4g"
+        - name: SW_CLUSTER
+          value: standalone
+        - name: SKYWALKING_COLLECTOR_UID
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.uid
+        - name: SW_STORAGE
+          value: elasticsearch
+        - name: SW_STORAGE_ES_CLUSTER_NODES
+          value: elasticsearch-logging:9200
+        - name: SW_NAMESPACE
+          value: skywalking     
+      imagePullSecrets:
+      - name: registry-pull-secret
+        
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: skywalking-oap
+  namespace: skywalking
+  labels:
+    app: skywalking-oap
+spec:
+  ports:
+  - port: 12800
+    name: rest
+  - port: 11800
+    name: grpc
+  - port: 1234
+    name: page
+  selector:
+    app: skywalking-oap
+---

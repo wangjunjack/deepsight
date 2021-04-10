@@ -1,0 +1,49 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: skywalking-ui
+  namespace: skywalking
+  labels:
+    app: ui
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ui
+  template:
+    metadata:
+      labels:
+        app: ui
+    spec:
+      imagePullSecrets:
+      - name: registry-pull-secret
+      containers:
+      - name: ui
+        image: hub.deepsight.cloud/skywalking/skywalking-ui:8.4.0
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8080
+          name: page
+        resources:
+          requests:
+            memory: 2Gi
+          limits:
+            memory: 4Gi
+        env:
+        - name: SW_OAP_ADDRESS
+          value: skywalking-oap.skywalking:12800
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ui
+  namespace: skywalking
+  labels:
+    service: ui
+spec:
+  ports:
+  - port: 8080
+    name: page
+  selector:
+    app: ui
+  type: NodePort
