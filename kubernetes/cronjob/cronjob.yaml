@@ -1,0 +1,63 @@
+apiVersion: batch/v1beta1
+kind: CronJob
+metadata:
+  name: deepsight-database-cronjob
+  namespace: cronjob
+spec:
+  concurrencyPolicy: Allow
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - args:
+            - /opt/backup.sh
+            command:
+            - sh
+            env:
+            - name: DB_HOST
+              value: mariadb.basic-resources
+            - name: DB_NAME
+              value: deepsight_v2
+            - name: DB_PASSWORD
+              value: DcvmfR0sXP
+            - name: DB_PORT
+              value: "3306"
+            - name: DB_USER
+              value: root
+            - name: S3_ACCESS_KEY
+              value: minio
+            - name: S3_HOST
+              value: image02-sz.deepsight.cloud
+            - name: S3_PROTOCOL
+              value: https
+            - name: S3_SECRET_KEY
+              value: deepsight0110
+            - name: TZ
+              value: Asia/Shanghai
+            image: hub.deepsight.cloud/deepsight/centos:cronjob7
+            imagePullPolicy: Always
+            name: deepsight-database-cronjob
+            resources: {}
+            securityContext:
+              allowPrivilegeEscalation: false
+              capabilities: {}
+              privileged: false
+              readOnlyRootFilesystem: false
+              runAsNonRoot: false
+            stdin: true
+            terminationMessagePath: /dev/termination-log
+            terminationMessagePolicy: File
+            tty: true
+          dnsPolicy: ClusterFirst
+          imagePullSecrets:
+          - name: registry-pull-secret
+          restartPolicy: Never
+          schedulerName: default-scheduler
+          securityContext: {}
+          terminationGracePeriodSeconds: 30
+  schedule: 0 0 * * *
+  successfulJobsHistoryLimit: 3
+  suspend: false
+
