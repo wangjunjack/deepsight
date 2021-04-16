@@ -1,0 +1,148 @@
+#!/usr/bin/env groovy
+// 所需插件: Git Parameter/Git/Pipeline/Config File Provider/kubernetes/Extended Choice Parameter
+// 公共
+def registry = "hub.deepsight.cloud"
+// 项目
+def project = "deepsight2.0"
+def git_url = "https://gitlab.spt.deepsight.cloud/deepsight_group/deepsight2.0.git"
+// 认证
+def image_pull_secret = "registry-pull-secret"
+def harbor_registry_auth = "d7df6156-355d-4d6b-aa31-71a02486fd94"
+def git_auth = "6d53b2c2-efdb-425e-8995-e03a1504808d"
+// ConfigFileProvider ID
+def k8s_auth = "1c620659-c09d-4152-9000-2a442525da69"
+
+pipeline {
+  agent {
+    kubernetes {
+        label "jenkins-slave"
+        yaml """
+kind: Pod
+metadata:
+  name: jenkins-slave
+  namespace: devops
+spec:
+  nodeName: node1
+  containers:
+  - name: jnlp
+    image: "${registry}/jenkins/jenkins-slave:5.1"
+    imagePullPolicy: IfNotPresent
+    resources:
+          limits:
+            cpu: 2000m
+            memory: 2048Mi
+          requests:
+            cpu: 1000m
+            memory: 1024Mi
+    volumeMounts:
+      - name: docker-cmd
+        mountPath: /usr/bin/docker
+      - name: docker-sock
+        mountPath: /var/run/docker.sock
+      - name: maven-cache
+        mountPath: /home/jenkins/.m2
+  volumes:
+    - name: docker-cmd
+      hostPath:
+        path: /usr/bin/docker
+    - name: docker-sock
+      hostPath:
+        path: /var/run/docker.sock
+    - name: maven-cache
+      hostPath:
+        path: /maven
+"""
+        }
+      
+      }
+    parameters {
+        gitParameter branch: '', branchFilter: '.*', defaultValue: 'origin/master', description: '选择发布的分支', name: 'Branch', quickFilterEnabled: false, selectedValue: 'NONE', sortMode: 'NONE', tagFilter: '*', type: 'PT_BRANCH'        
+        extendedChoice defaultValue: 'none', description: '选择发布的微服务', \
+          multiSelectDelimiter: ',', name: 'Deepsight', type: 'PT_CHECKBOX', \
+          value: 'deepsight-gateway:80,deepsight-oauth:13130,deepsight-sample:13137,deepsight-tag:13136,deepsight-report:13153,deepsight-system:13131,deepsight-fund:13135,deepsight-flow:13161,deepsight-file:13142,deepsight-express:13147,deepsight-daily:13150,deepsight-cost:13154,deepsight-mq:13152,deepsight-mq-unzip:13167,deepsight-outside:8081,deepsight-vaccine:13138,deepsight-self-check:13139,deepsight-zm:13145'
+        choice (choices: ['1', '3'], description: '副本数', name: 'ReplicaCount')
+        choice (choices: ['deepsight-test'], description: '命名空间', name: 'Namespace')
+    }
+    stages {
+        stage('拉取代码'){
+            steps {
+                checkout([$class: 'GitSCM', 
+                branches: [[name: "${params.Branch}"]], 
+                doGenerateSubmoduleConfigurations: false, 
+                extensions: [], submoduleCfg: [], 
+                userRemoteConfigs: [[credentialsId: "${git_auth}", url: "${git_url}"]]
+                ])
+            }
+        }
+        stage('代码编译') {
+            // 编译指定服务
+            steps {
+                sh """
+                mvn clean package -Dmaven.test.skip=true
+                """
+            }
+        }
+        stage('构建镜像') {
+          steps {
+              withCredentials([usernamePassword(credentialsId: "${harbor_registry_auth}", passwordVariable: 'password', usernameVariable: 'username')]) {
+                sh """
+                 docker login -u ${username} -p '${password}' ${registry}
+                 for service in \$(echo ${Deepsight} |sed 's/,/ /g'); do
+                    service_name=\${service%:*}
+                    image_name=${registry}/${project}/\${service_name}:${BUILD_NUMBER}
+                    if [ ! -d \${service_name} ]; then
+                        cd ./deepsight-service/\${service_name}
+                    else
+                        cd \${service_name}
+                    fi
+                    docker build -t \${image_name} .
+                    docker push \${image_name}
+                    cd ${WORKSPACE}
+                  done
+                """
+                configFileProvider([configFile(fileId: "${k8s_auth}", targetLocation: "admin.kubeconfig")]){
+                    sh """
+                    # 添加镜像拉取认证
+                    #kubectl create secret docker-registry ${image_pull_secret} --docker-username=${username} --docker-password=${password} --docker-server=${registry} -n ${Namespace} --kubeconfig admin.kubeconfig |true
+                    # 添加私有chart仓库
+                    #helm init --client-only
+                    #helm repo add  --username ${username} --password ${password} deepsight http://${registry}/chartrepo/${project}
+                    #helm repo update
+                    """
+                }
+              }
+          }
+        }
+        stage('部署到K8S') { 
+          steps {
+              sh """
+              common_args="--namespace ${Namespace} --kubeconfig admin.kubeconfig"
+              #common_args1="${Namespace} --kubeconfig admin.kubeconfig"
+             
+              for service in  \$(echo ${Deepsight} |sed 's/,/ /g'); do
+                service_name="\${service%:*}"
+                service_port="\${service##*:}"
+                image_name="${registry}/${project}/\${service_name}:${BUILD_NUMBER}"
+                
+                #sed -i 's#\$IMAGE_NAME#'''\${image_name}'''#' deployment-test.yaml
+                #sed -i 's#\$SERVICE_NAME#'''\${service_name}'''#' deployment-test.yaml
+                #sed -i 's#\$NAMESPACE#'''${Namespace}'''#' deployment-test.yaml
+                #sed -i 's#\$PORT#'''\${service_port}'''#' deployment-test.yaml
+                
+                sed -i 's#\$IMAGE_NAME#'''\${image_name}'''#' ./deployments/test-\${service_name}-skywalking.yaml
+                kubectl apply -f ./deployments/test-\${service_name}-skywalking.yaml --kubeconfig admin.kubeconfig
+              
+                #kubectl apply -f deployment-test.yaml --kubeconfig admin.kubeconfig
+                sleep 1
+              done  
+              sleep 10
+              kubectl get pods \${common_args}
+               
+             
+              """
+              
+          }
+        }
+    }
+}
+
