@@ -1,0 +1,102 @@
+---
+# Deployment include Skywalking Agent of Sidecar. The Version's 8.4.0-es6
+# This is Gateway service for springcloudAlibaba
+# By John Wang 2021-03-25 PM 11:30
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: $SERVICE_NAME
+  namespace: $NAMESPACE
+  labels:
+    app: $SERVICE_NAME
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: $SERVICE_NAME
+  template:
+    metadata:
+      labels:
+        app: $SERVICE_NAME
+    spec:
+      imagePullSecrets:
+      - name: registry-pull-secret
+      initContainers:
+        - image: hub.deepsight.cloud/skywalking/skywalking-agent-sidecar:8.4.0
+          name: sw-agent-sidecar
+          imagePullPolicy: Always
+          command: ["sh"]
+          args:
+            [
+            "-c",
+            "mkdir -p /skywalking/agent && cp -r /usr/skywalking/agent/* /skywalking/agent",
+            ]
+          volumeMounts:
+            - mountPath: /skywalking/agent
+              name: sw-agent
+      containers:
+      - name: ds-cost
+        image:  $IMAGE_NAME
+        imagePullPolicy: IfNotPresent
+        command: ["java"]
+        args:
+          [
+           "-javaagent:/usr/skywalking/agent/skywalking-agent.jar", "-jar", "app.jar","--spring.profiles.active=test",
+          ]
+        env:
+          - name: SW_AGENT_NAME # 定义服务名称,在skywalking UI中显示服务的实例名称
+            value: $SERVICE_NAME
+          - name: SW_AGENT_COLLECTOR_BACKEND_SERVICES # 定义OAP server Addresses
+            value: skywalking-oap.skywalking:11800 
+        resources:
+          limits:
+            memory: "1500Mi"
+            cpu: "800m"
+          requests:
+            memory: "1024Mi"
+            cpu: "500m"
+        # readinessProbe:
+        #   httpGet:
+        #    path: /actuator
+        #    port: 13154
+        #   initialDelaySeconds: 50 # 容器启动后多少秒开始健康检查
+        #   periodSeconds: 10 # Inspection interval
+        # livenessProbe:
+        #   httpGet:
+        #     path: /actuator
+        #     port: 13154
+        #   initialDelaySeconds: 50
+        #   periodSeconds: 10
+        ports:
+        - containerPort: $PORT
+          name: httpservice
+          protocol: TCP
+        volumeMounts:
+        - name: host-time
+          mountPath: /etc/localtime
+        - name: sw-agent
+          mountPath: /usr/skywalking/agent
+      volumes:
+        - name: sw-agent
+          emptyDir: {}
+        - name: host-time
+          hostPath:
+            path: /etc/localtime
+---
+# Serivce For Deepsight-Gateway
+apiVersion: v1
+kind: Service
+metadata:
+  name: $SERVICE_NAME
+  namespace: $NAMESPACE
+  labels:
+    app: $SERVICE_NAME
+spec:
+  ports:
+  - name: web
+    port: $PORT
+    protocol: TCP
+    targetPort: $PORT
+  selector:
+    app: $SERVICE_NAME
+  
